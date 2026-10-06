@@ -2,9 +2,10 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"log/slog"
 	"net/http"
 
+	pkgerr "github.com/pkg/errors"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -34,7 +35,10 @@ func (s *server) authMiddleware(next http.Handler) http.Handler {
 		}
 		ok, err := s.validatePassword(password, stored)
 		if err != nil {
-			fmt.Printf("error validating password for user: %s, error: %v\n", username, err)
+			s.logger.Error("error validating password",
+				slog.String("user", username),
+				slog.Any("error", err),
+			)
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
@@ -53,8 +57,8 @@ func (s *server) validatePassword(password, stored string) (bool, error) {
 		return false, nil
 	}
 	if err != nil {
-		fmt.Printf("error validating password: %v\n", err)
-		return false, err
+
+		return false, pkgerr.WithStack(err)
 	}
 	return true, nil
 }
