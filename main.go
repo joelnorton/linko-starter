@@ -19,6 +19,8 @@ import (
 	"github.com/lmittmann/tint"
 	"github.com/mattn/go-isatty"
 	pkgerr "github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
@@ -31,6 +33,14 @@ type multiError interface {
 	error
 	Unwrap() []error
 }
+
+var httpRequestsTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "http_requests_total",
+		Help: "Total number of HTTP requests.",
+	},
+	[]string{"method", "path", "status"},
+)
 
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -45,6 +55,16 @@ func main() {
 }
 
 func run(ctx context.Context, cancel context.CancelFunc, httpPort int, dataDir string) int {
+	traceclean, err := initTracing(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to initialize tracer: %v\n", err)
+		return 1
+	}
+	defer func() {
+		if err = traceclean(context.Background()); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to close tracer: %v\n", err)
+		}
+	}()
 	logger, cleanup, err := initializeLogger(os.Getenv("LINKO_LOG_FILE"))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)

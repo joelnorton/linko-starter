@@ -1,0 +1,19 @@
+File: linko
+Build ID: 616cd43f2ac686d4d307ffb03d898576f42e54d9
+Type: inuse_space
+Time: 2026-10-07 04:45:08 EDT
+Duration: 30.01s, Total samples = 1.02MB 
+Showing nodes accounting for 1.02MB, 100% of 1.02MB total
+      flat  flat%   sum%        cum   cum%
+    1.02MB   100%   100%     1.02MB   100%  internal/bytealg.MakeNoZero
+         0     0%   100%     1.02MB   100%  main.(*server).handlerRedirect
+         0     0%   100%     1.02MB   100%  main.metricsMiddleware.func1
+         0     0%   100%     1.02MB   100%  main.requestID.func1.func1
+         0     0%   100%     1.02MB   100%  main.requestLogger.func1.func1
+         0     0%   100%     1.02MB   100%  net/http.(*ServeMux).ServeHTTP
+         0     0%   100%     1.02MB   100%  net/http.(*conn).serve
+         0     0%   100%     1.02MB   100%  net/http.HandlerFunc.ServeHTTP
+         0     0%   100%     1.02MB   100%  net/http.serverHandler.ServeHTTP
+         0     0%   100%     1.02MB   100%  strings.(*Builder).Grow
+         0     0%   100%     1.02MB   100%  strings.(*Builder).grow
+         0     0%   100%     1.02MB   100%  strings.Repeat

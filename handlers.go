@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -28,16 +29,23 @@ var (
 var indexPage string
 
 func (s *server) handlerIndex(w http.ResponseWriter, r *http.Request) {
+	_, span := tracer.Start(r.Context(), "handler.index")
+	defer span.End()
+
 	w.Header().Set("Content-Type", "text/html")
 	io.WriteString(w, indexPage)
 }
 
 func (s *server) handlerLogin(w http.ResponseWriter, r *http.Request) {
+	_, span := tracer.Start(r.Context(), "handler.login")
+	defer span.End()
 	w.WriteHeader(http.StatusOK)
 }
 
 func (s *server) handlerShortenLink(w http.ResponseWriter, r *http.Request) {
-	user, ok := r.Context().Value(UserContextKey).(string)
+	ctx, span := tracer.Start(r.Context(), "handler.shorten_link")
+	defer span.End()
+	user, ok := ctx.Value(UserContextKey).(string)
 	if !ok || user == "" {
 		httpError(r.Context(), w, http.StatusUnauthorized, fmt.Errorf("unauthorized"))
 		return
@@ -52,7 +60,7 @@ func (s *server) handlerShortenLink(w http.ResponseWriter, r *http.Request) {
 		httpError(r.Context(), w, http.StatusBadRequest, fmt.Errorf("invalid URL: must include scheme (http/https) and host"))
 		return
 	}
-	if err := checkDestination(longURL); err != nil {
+	if err := checkDestination(r.Context(), longURL); err != nil {
 		httpError(r.Context(), w, http.StatusBadRequest, fmt.Errorf("invalid target URL: %v", err))
 		return
 	}
@@ -71,21 +79,23 @@ func (s *server) handlerShortenLink(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handlerRedirect(w http.ResponseWriter, r *http.Request) {
-	longURL, err := s.store.Lookup(r.Context(), r.PathValue("shortCode"))
+	ctx, span := tracer.Start(r.Context(), "handler.redirect")
+	defer span.End()
+	longURL, err := s.store.Lookup(ctx, r.PathValue("shortCode"))
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			httpError(r.Context(), w, http.StatusNotFound, fmt.Errorf("not found"))
+			httpError(ctx, w, http.StatusNotFound, fmt.Errorf("not found"))
 		} else {
 			s.logger.Error("failed to lookup URL",
 				slog.Any("error", err),
 			)
-			httpError(r.Context(), w, http.StatusInternalServerError, fmt.Errorf("internal server error"))
+			httpError(ctx, w, http.StatusInternalServerError, fmt.Errorf("internal server error"))
 		}
 		return
 	}
 	_, _ = bcrypt.GenerateFromPassword([]byte(longURL), bcrypt.DefaultCost)
-	if err := checkDestination(longURL); err != nil {
-		httpError(r.Context(), w, http.StatusBadGateway, fmt.Errorf("destination unavailable"))
+	if err := checkDestination(ctx, longURL); err != nil {
+		httpError(ctx, w, http.StatusBadGateway, fmt.Errorf("destination unavailable"))
 		return
 	}
 
@@ -97,12 +107,14 @@ func (s *server) handlerRedirect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handlerListURLs(w http.ResponseWriter, r *http.Request) {
-	codes, err := s.store.List(r.Context())
+	ctx, span := tracer.Start(r.Context(), "handler.list_urls")
+	defer span.End()
+	codes, err := s.store.List(ctx)
 	if err != nil {
 		s.logger.Error("failed to list URLs",
 			slog.Any("error", err),
 		)
-		httpError(r.Context(), w, http.StatusInternalServerError, fmt.Errorf("failed to list URLs"))
+		httpError(ctx, w, http.StatusInternalServerError, fmt.Errorf("failed to list URLs"))
 		return
 	}
 
@@ -110,7 +122,9 @@ func (s *server) handlerListURLs(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(codes)
 }
 
-func (s *server) handlerStats(w http.ResponseWriter, _ *http.Request) {
+func (s *server) handlerStats(w http.ResponseWriter, r *http.Request) {
+	_, span := tracer.Start(r.Context(), "handler.stats")
+	defer span.End()
 	redirectsMu.Lock()
 	snapshot := redirects
 	redirectsMu.Unlock()
@@ -139,4 +153,33 @@ func requestID() func(http.Handler) http.Handler {
 
 		})
 	}
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func metricsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{
+			ResponseWriter: w,
+			status:         http.StatusOK,
+		}
+
+		next.ServeHTTP(rec, r)
+
+		path := r.URL.Path
+		method := r.Method
+		status := strconv.Itoa(rec.status)
+
+		httpRequestsTotal.
+			WithLabelValues(method, path, status).
+			Inc()
+	})
 }
